@@ -75,10 +75,24 @@ class SelectorBIC(ModelSelector):
         :return: GaussianHMM object
         """
         warnings.filterwarnings("ignore", category=DeprecationWarning)
-
-        # TODO implement model selection based on BIC scores
-        raise NotImplementedError
-
+        
+        best_n_components = self.min_n_components
+        best_bic = float('inf')
+        
+        for n_components in range(self.min_n_components, self.max_n_components + 1):
+            model = self.base_model(n_components) 
+            try:
+                logL = model.score(self.X, self.lengths)
+                logN = np.log(self.X.shape[0])
+                p = n_components * (n_components - 1) + 2 * self.X[0].shape[0] * n_components
+                current_bic = -2 * logL + p * logN
+                if current_bic < best_bic:
+                    best_bic = current_bic
+                    best_n_components = n_components
+            except:
+                continue
+                
+        return self.base_model(best_n_components)
 
 class SelectorDIC(ModelSelector):
     ''' select best model based on Discriminative Information Criterion
@@ -93,17 +107,50 @@ class SelectorDIC(ModelSelector):
     def select(self):
         warnings.filterwarnings("ignore", category=DeprecationWarning)
 
-        # TODO implement model selection based on DIC scores
-        raise NotImplementedError
+        best_n_components = self.min_n_components
+        best_dic = float('-inf')
+        
+        for n_components in range(self.min_n_components, self.max_n_components + 1):
+            model = self.base_model(n_components)
+            try:
+                current_word_logL = model.score(self.X, self.lengths) 
+                avg_logL = np.average([model.score(*self.hwords[word]) for word in self.words if word != self.this_word])
+                current_dic = current_word_logL - avg_logL
+                if current_dic >= best_dic:
+                    best_dic = current_dic
+                    best_n_components = n_components
+            except:
+                continue
 
-
+        return self.base_model(best_n_components)
+ 
 class SelectorCV(ModelSelector):
     ''' select best model based on average log Likelihood of cross-validation folds
 
     '''
-
+    
     def select(self):
         warnings.filterwarnings("ignore", category=DeprecationWarning)
 
-        # TODO implement model selection using CV
-        raise NotImplementedError
+        best_model = None
+        best_score = float('-inf')
+        n_splits = min(len(self.sequences), 3)
+        
+        for n_components in range(self.min_n_components, self.max_n_components + 1):
+            if len(self.sequences) == 1:
+                continue
+            scores = []
+            for cv_train_idx, cv_test_idx in KFold(n_splits).split(self.sequences):
+                try:
+                    train_X, train_lengths = combine_sequences(cv_train_idx, self.sequences)
+                    test_X, test_lengths = combine_sequences(cv_test_idx, self.sequences)
+                    model = self.base_model(n_components).fit(train_X, train_lengths)
+                    scores.append(model.score(test_X, test_lengths))
+                except:
+                    continue
+
+                avg_score = np.average(scores)
+                if avg_score > best_score:
+                    best_model = model
+                    best_score = avg_score
+        return best_model
